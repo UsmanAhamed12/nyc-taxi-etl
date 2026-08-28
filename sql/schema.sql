@@ -117,6 +117,13 @@ CREATE TABLE IF NOT EXISTS silver.taxi_trips (
         CHECK (trip_duration_minutes >= 0)
 );
 
+CREATE TABLE IF NOT EXISTS silver.rejected_taxi_trips (
+    bronze_trip_id BIGINT PRIMARY KEY
+        REFERENCES bronze.taxi_trips(bronze_trip_id),
+    rejection_reason TEXT NOT NULL,
+    rejected_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 
 -- ============================================================
 -- 4. GOLD DIMENSIONS
