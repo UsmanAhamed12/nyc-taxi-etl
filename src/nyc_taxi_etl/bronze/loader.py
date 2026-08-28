@@ -32,6 +32,29 @@ SOURCE_TO_BRONZE_COLUMNS = {
     "total_amount": "total_amount",
     "congestion_surcharge": "congestion_surcharge",
     "airport_fee": "airport_fee",
+    "Airport_fee": "airport_fee",
+}
+
+EXPECTED_BRONZE_COLUMNS = {
+    "vendor_id",
+    "pickup_datetime",
+    "dropoff_datetime",
+    "passenger_count",
+    "trip_distance",
+    "rate_code_id",
+    "store_and_fwd_flag",
+    "pickup_location_id",
+    "dropoff_location_id",
+    "payment_type",
+    "fare_amount",
+    "extra",
+    "mta_tax",
+    "tip_amount",
+    "tolls_amount",
+    "improvement_surcharge",
+    "total_amount",
+    "congestion_surcharge",
+    "airport_fee",
 }
 
 
@@ -50,6 +73,19 @@ class BronzeLoader:
 
         parquet_file = pq.ParquetFile(path)
         source_row_count = parquet_file.metadata.num_rows
+
+        # source_columns = set(parquet_file.schema_arrow.names)
+        # EXPECTED_SOURCE_COLUMNS = set(SOURCE_TO_BRONZE_COLUMNS)
+
+        # missing_columns = EXPECTED_SOURCE_COLUMNS - source_columns
+        # unexpected_columns = source_columns - EXPECTED_SOURCE_COLUMNS
+
+        # if missing_columns or unexpected_columns:
+        #     raise ValueError(
+        #         f"Source schema validation failed for {path.name}. "
+        #         f"Missing columns: {sorted(missing_columns)}. "
+        #         f"Unexpected columns: {sorted(unexpected_columns)}."
+        #     )
 
         logger.info(
             "bronze_load_started",
@@ -140,6 +176,18 @@ class BronzeLoader:
         dataframe = batch.to_pandas()
 
         dataframe = dataframe.rename(columns=SOURCE_TO_BRONZE_COLUMNS)
+
+        actual_columns = set(dataframe.columns)
+
+        missing_columns = EXPECTED_BRONZE_COLUMNS - actual_columns
+        unexpected_columns = actual_columns - EXPECTED_BRONZE_COLUMNS
+
+        if missing_columns or unexpected_columns:
+            raise ValueError(
+                f"Normalized schema validation failed for {source_file}. "
+                f"Missing columns: {sorted(missing_columns)}. "
+                f"Unexpected columns: {sorted(unexpected_columns)}."
+            )
 
         dataframe["source_file"] = source_file
 

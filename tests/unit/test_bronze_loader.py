@@ -3,7 +3,7 @@ from pathlib import Path
 import pyarrow as pa
 import pytest
 
-from nyc_taxi_etl.bronze.loader import BronzeLoader
+from nyc_taxi_etl.bronze.loader import SOURCE_TO_BRONZE_COLUMNS, BronzeLoader
 
 
 def test_load_file_raises_when_source_does_not_exist() -> None:
@@ -36,3 +36,8 @@ def test_source_batch_has_expected_columns() -> None:
         "VendorID",
         "trip_distance",
     ]
+
+
+def test_airport_fee_schema_variants_are_normalized() -> None:
+    assert SOURCE_TO_BRONZE_COLUMNS["airport_fee"] == "airport_fee"
+    assert SOURCE_TO_BRONZE_COLUMNS["Airport_fee"] == "airport_fee"
