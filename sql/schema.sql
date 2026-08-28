@@ -50,6 +50,18 @@ CREATE TABLE IF NOT EXISTS bronze.taxi_trips (
     ingested_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS bronze.ingestion_audit (
+    source_file TEXT PRIMARY KEY,
+    source_row_count BIGINT NOT NULL,
+    loaded_row_count BIGINT NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    started_at TIMESTAMPTZ NOT NULL,
+    completed_at TIMESTAMPTZ,
+
+    CONSTRAINT chk_ingestion_status
+        CHECK (status IN ('STARTED', 'COMPLETED', 'FAILED'))
+);
+
 
 -- ============================================================
 -- 3. SILVER LAYER
