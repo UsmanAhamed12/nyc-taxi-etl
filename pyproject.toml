@@ -1,0 +1,30 @@
+[project]
+name = "nyc-taxi-etl"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Usman Ahamed", email = "ahmeduzman432@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "pandas>=3.0.5",
+    "psycopg2-binary>=2.9.12",
+    "pyarrow>=25.0.1",
+    "pydantic-settings>=2.15.0",
+    "sqlalchemy>=2.0.52",
+    "streamlit>=1.62.0",
+]
+
+[project.scripts]
+nyc-taxi-etl = "nyc_taxi_etl:main"
+
+[build-system]
+requires = ["uv_build>=0.10.12,<0.11.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.16.5",
+]

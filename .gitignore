@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Virtual environment
+.venv/
+
+# Environment variables
+.env
+
+# NYC TLC raw data
+data/raw/*.parquet
+
+# Airflow
+airflow/logs/*
+!airflow/logs/.gitkeep
+
+# macOS
+.DS_Store
+
+# Streamlit
+.streamlit/
+
+# IDE
+.vscode/
+.idea/
