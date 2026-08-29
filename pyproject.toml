@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Airflow-orchestrated NYC Yellow Taxi batch ETL and analytics warehouse"
 readme = "README.md"
 authors = [
-    { name = "Usman Ahamed", email = "ahmeduzman432@gmail.com" }
+    { name = "Usman Ahamed", email = "itsmeuzmanahamed@gmail.com" }
 ]
 requires-python = ">=3.12"
 dependencies = [

@@ -284,4 +284,4 @@ This repository uses the January and February 2023 Yellow Taxi Parquet files.
 
 **Usman Ahamed**<br>
 Data Engineer<br>
-[ahmeduzman432@gmail.com](mailto:ahmeduzman432@gmail.com)
+[itsmeuzmanahamed@gmail.com](mailto:itsmeuzmanahamed@gmail.com)
