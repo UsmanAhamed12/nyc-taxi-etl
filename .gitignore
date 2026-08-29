@@ -27,3 +27,6 @@ airflow/logs/*
 # IDE
 .vscode/
 .idea/
+
+# Local backup files
+*.backup

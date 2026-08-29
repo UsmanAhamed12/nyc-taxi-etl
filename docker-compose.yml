@@ -1,7 +1,81 @@
+x-airflow-common:
+  &airflow-common
+  build:
+    context: .
+    dockerfile: Dockerfile.airflow
+
+  image: nyc-taxi-airflow:3.3.1
+
+  environment:
+    &airflow-common-env
+    # --------------------------------------------------
+    # Airflow
+    # --------------------------------------------------
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: >-
+      postgresql+psycopg2://${AIRFLOW_DB_USER}:${AIRFLOW_DB_PASSWORD}@airflow-db:5432/${AIRFLOW_DB}
+
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+
+    AIRFLOW__API_AUTH__JWT_SECRET: "nyc-taxi-local-airflow-jwt-secret-2026-development-only-change-in-production"
+
+    AIRFLOW__CORE__PARALLELISM: "2"
+    
+    AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+
+    # Local-development authentication only.
+    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "true"
+
+    # Airflow 3 task execution API.
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: >-
+      http://airflow-apiserver:8080/execution/
+
+    # --------------------------------------------------
+    # NYC Taxi application
+    #
+    # IMPORTANT:
+    # Airflow runs inside Docker, therefore it connects
+    # to warehouse-db:5432 rather than localhost:5433.
+    # --------------------------------------------------
+    POSTGRES_HOST: warehouse-db
+    POSTGRES_PORT: 5432
+    POSTGRES_DB: ${POSTGRES_DB}
+    POSTGRES_USER: ${POSTGRES_USER}
+    POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+
+    ENVIRONMENT: airflow
+
+    TLC_DATA_DIR: /opt/airflow/data/raw
+
+  volumes:
+    - ./airflow/dags:/opt/airflow/dags
+    - ./airflow/logs:/opt/airflow/logs
+    - ./airflow/config:/opt/airflow/config
+    - ./airflow/plugins:/opt/airflow/plugins
+    - ./data/raw:/opt/airflow/data/raw:ro
+    - ./sql:/opt/airflow/sql:ro
+
+  user: "${AIRFLOW_UID:-50000}:0"
+
+  depends_on:
+    airflow-db:
+      condition: service_healthy
+
+    warehouse-db:
+      condition: service_healthy
+
+
 services:
+
+  # ==================================================
+  # DATA WAREHOUSE DATABASE
+  # ==================================================
   warehouse-db:
     image: postgres:17
+
     container_name: nyc-taxi-warehouse
+
     restart: unless-stopped
 
     environment:
@@ -25,5 +99,144 @@ services:
       timeout: 5s
       retries: 10
 
+
+  # ==================================================
+  # AIRFLOW METADATA DATABASE
+  # ==================================================
+  airflow-db:
+    image: postgres:17
+
+    container_name: nyc-taxi-airflow-db
+
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: ${AIRFLOW_DB}
+      POSTGRES_USER: ${AIRFLOW_DB_USER}
+      POSTGRES_PASSWORD: ${AIRFLOW_DB_PASSWORD}
+
+    volumes:
+      - airflow_postgres_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${AIRFLOW_DB_USER} -d ${AIRFLOW_DB}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+
+  # ==================================================
+  # AIRFLOW DATABASE INITIALIZATION / MIGRATIONS
+  # ==================================================
+  airflow-init:
+    <<: *airflow-common
+
+    container_name: nyc-taxi-airflow-init
+
+    command:
+      - bash
+      - -c
+      - |
+        echo "Running Airflow database migrations..."
+        airflow db migrate
+        echo "Airflow database initialization completed."
+
+    restart: "no"
+
+
+  # ==================================================
+  # AIRFLOW API SERVER + UI
+  # ==================================================
+  airflow-apiserver:
+    <<: *airflow-common
+
+    container_name: nyc-taxi-airflow-apiserver
+
+    command: api-server
+
+    restart: unless-stopped
+
+    ports:
+      - "8080:8080"
+
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+      airflow-db:
+        condition: service_healthy
+
+      warehouse-db:
+        condition: service_healthy
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "--fail",
+          "http://localhost:8080/api/v2/monitor/health",
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+
+  # ==================================================
+  # AIRFLOW SCHEDULER
+  # ==================================================
+  airflow-scheduler:
+    <<: *airflow-common
+
+    container_name: nyc-taxi-airflow-scheduler
+
+    command: scheduler
+
+    restart: unless-stopped
+
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+      airflow-db:
+        condition: service_healthy
+
+      warehouse-db:
+        condition: service_healthy
+
+
+  # ==================================================
+  # AIRFLOW DAG PROCESSOR
+  #
+  # Required as a standalone component in Airflow 3.
+  # ==================================================
+  airflow-dag-processor:
+    <<: *airflow-common
+
+    container_name: nyc-taxi-airflow-dag-processor
+
+    command: dag-processor
+
+    restart: unless-stopped
+
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+      airflow-db:
+        condition: service_healthy
+
+      warehouse-db:
+        condition: service_healthy
+
+
 volumes:
+
   warehouse_postgres_data:
+
+  airflow_postgres_data:

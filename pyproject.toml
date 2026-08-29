@@ -1,13 +1,14 @@
 [project]
 name = "nyc-taxi-etl"
 version = "0.1.0"
-description = "Add your description here"
+description = "Airflow-orchestrated NYC Yellow Taxi batch ETL and analytics warehouse"
 readme = "README.md"
 authors = [
     { name = "Usman Ahamed", email = "ahmeduzman432@gmail.com" }
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "apache-airflow>=3.3.1",
     "pandas>=3.0.5",
     "psycopg2-binary>=2.9.12",
     "pyarrow>=25.0.1",

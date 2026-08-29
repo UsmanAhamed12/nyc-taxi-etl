@@ -12,6 +12,10 @@ from nyc_taxi_etl.database import get_connection
 logger = logging.getLogger(__name__)
 
 
+REPORTING_START = pd.Timestamp("2023-01-01 00:00:00")
+REPORTING_END = pd.Timestamp("2023-03-01 00:00:00")
+
+
 SILVER_COLUMNS = [
     "bronze_trip_id",
     "vendor_id",
@@ -41,7 +45,7 @@ SILVER_COLUMNS = [
 
 
 class SilverTransformer:
-    """Clean Bronze taxi trips and load valid records into Silver."""
+    """Clean Bronze taxi trips and load valid Jan-Feb 2023 records into Silver."""
 
     def __init__(self, batch_size: int = 50_000) -> None:
         self.batch_size = batch_size
@@ -54,7 +58,10 @@ class SilverTransformer:
 
         if dataframe.empty:
             return dataframe.copy(), pd.DataFrame(
-                columns=["bronze_trip_id", "rejection_reason"]
+                columns=[
+                    "bronze_trip_id",
+                    "rejection_reason",
+                ]
             )
 
         transformed = dataframe.copy()
@@ -63,6 +70,7 @@ class SilverTransformer:
             transformed["pickup_datetime"],
             errors="coerce",
         )
+
         transformed["dropoff_datetime"] = pd.to_datetime(
             transformed["dropoff_datetime"],
             errors="coerce",
@@ -74,16 +82,25 @@ class SilverTransformer:
             dtype="string",
         )
 
+        # ---------------------------------------------------------
+        # 1. Pickup datetime must exist and be valid.
+        # ---------------------------------------------------------
         rejection_reason = rejection_reason.mask(
             transformed["pickup_datetime"].isna(),
             "missing_or_invalid_pickup_datetime",
         )
 
+        # ---------------------------------------------------------
+        # 2. Dropoff datetime must exist and be valid.
+        # ---------------------------------------------------------
         rejection_reason = rejection_reason.mask(
             rejection_reason.isna() & transformed["dropoff_datetime"].isna(),
             "missing_or_invalid_dropoff_datetime",
         )
 
+        # ---------------------------------------------------------
+        # 3. Dropoff cannot occur before pickup.
+        # ---------------------------------------------------------
         rejection_reason = rejection_reason.mask(
             rejection_reason.isna()
             & transformed["pickup_datetime"].notna()
@@ -92,6 +109,28 @@ class SilverTransformer:
             "dropoff_before_pickup",
         )
 
+        # ---------------------------------------------------------
+        # 4. Assessment reporting window:
+        #
+        #    2023-01-01 <= pickup_datetime < 2023-03-01
+        #
+        # Records outside Jan-Feb 2023 are retained in the
+        # rejection table for traceability instead of being
+        # silently discarded.
+        # ---------------------------------------------------------
+        outside_reporting_period = transformed["pickup_datetime"].notna() & (
+            (transformed["pickup_datetime"] < REPORTING_START)
+            | (transformed["pickup_datetime"] >= REPORTING_END)
+        )
+
+        rejection_reason = rejection_reason.mask(
+            rejection_reason.isna() & outside_reporting_period,
+            "outside_reporting_period",
+        )
+
+        # ---------------------------------------------------------
+        # 5. Trip distance must be present and non-negative.
+        # ---------------------------------------------------------
         rejection_reason = rejection_reason.mask(
             rejection_reason.isna()
             & (
@@ -100,23 +139,35 @@ class SilverTransformer:
             "invalid_trip_distance",
         )
 
+        # ---------------------------------------------------------
+        # 6. Fare amount must be present and non-negative.
+        # ---------------------------------------------------------
         rejection_reason = rejection_reason.mask(
             rejection_reason.isna()
             & (transformed["fare_amount"].isna() | (transformed["fare_amount"] < 0)),
             "invalid_fare_amount",
         )
 
+        # ---------------------------------------------------------
+        # 7. Total amount must be present and non-negative.
+        # ---------------------------------------------------------
         rejection_reason = rejection_reason.mask(
             rejection_reason.isna()
             & (transformed["total_amount"].isna() | (transformed["total_amount"] < 0)),
             "invalid_total_amount",
         )
 
+        # ---------------------------------------------------------
+        # 8. Pickup location is required.
+        # ---------------------------------------------------------
         rejection_reason = rejection_reason.mask(
             rejection_reason.isna() & transformed["pickup_location_id"].isna(),
             "missing_pickup_location",
         )
 
+        # ---------------------------------------------------------
+        # 9. Dropoff location is required.
+        # ---------------------------------------------------------
         rejection_reason = rejection_reason.mask(
             rejection_reason.isna() & transformed["dropoff_location_id"].isna(),
             "missing_dropoff_location",
@@ -127,6 +178,7 @@ class SilverTransformer:
         valid = transformed.loc[valid_mask].copy()
 
         valid["pickup_date"] = valid["pickup_datetime"].dt.date
+
         valid["pickup_hour"] = valid["pickup_datetime"].dt.hour
 
         valid["trip_duration_minutes"] = (
@@ -148,6 +200,8 @@ class SilverTransformer:
         self,
         max_batches: int | None = None,
     ) -> dict[str, int | float]:
+        """Transform pending Bronze records into Silver."""
+
         start_time = perf_counter()
 
         total_read = 0
@@ -157,45 +211,69 @@ class SilverTransformer:
 
         logger.info(
             "silver_transform_started",
-            extra={"batch_size": self.batch_size},
+            extra={
+                "batch_size": self.batch_size,
+                "reporting_start": str(REPORTING_START),
+                "reporting_end": str(REPORTING_END),
+            },
         )
 
-        while True:
-            with get_connection() as connection:
-                dataframe = self._read_next_batch(connection)
+        try:
+            while True:
+                with get_connection() as connection:
+                    dataframe = self._read_next_batch(connection)
 
-                if dataframe.empty:
+                    if dataframe.empty:
+                        break
+
+                    valid, rejected = self.transform_batch(dataframe)
+
+                    if not valid.empty:
+                        self._load_valid_batch(
+                            connection,
+                            valid,
+                        )
+
+                    if not rejected.empty:
+                        self._load_rejected_batch(
+                            connection,
+                            rejected,
+                        )
+
+                    rows_read = len(dataframe)
+                    rows_loaded = len(valid)
+                    rows_rejected = len(rejected)
+
+                    total_read += rows_read
+                    total_loaded += rows_loaded
+                    total_rejected += rows_rejected
+                    batch_count += 1
+
+                    logger.info(
+                        "silver_batch_completed",
+                        extra={
+                            "batch_number": batch_count,
+                            "rows_read": rows_read,
+                            "rows_loaded": rows_loaded,
+                            "rows_rejected": rows_rejected,
+                        },
+                    )
+
+                if max_batches is not None and batch_count >= max_batches:
                     break
 
-                valid, rejected = self.transform_batch(dataframe)
+        except Exception:
+            logger.exception(
+                "silver_transform_failed",
+                extra={
+                    "batches_processed": batch_count,
+                    "rows_read": total_read,
+                    "rows_loaded": total_loaded,
+                    "rows_rejected": total_rejected,
+                },
+            )
 
-                if not valid.empty:
-                    self._load_valid_batch(connection, valid)
-
-                if not rejected.empty:
-                    self._load_rejected_batch(connection, rejected)
-
-                rows_read = len(dataframe)
-                rows_loaded = len(valid)
-                rows_rejected = len(rejected)
-
-                total_read += rows_read
-                total_loaded += rows_loaded
-                total_rejected += rows_rejected
-                batch_count += 1
-
-                logger.info(
-                    "silver_batch_completed",
-                    extra={
-                        "batch_number": batch_count,
-                        "rows_read": rows_read,
-                        "rows_loaded": rows_loaded,
-                        "rows_rejected": rows_rejected,
-                    },
-                )
-
-            if max_batches is not None and batch_count >= max_batches:
-                break
+            raise
 
         duration_seconds = round(
             perf_counter() - start_time,
@@ -225,6 +303,8 @@ class SilverTransformer:
         self,
         connection: Connection,
     ) -> pd.DataFrame:
+        """Read the next unprocessed Bronze batch."""
+
         query = text(
             """
             SELECT
@@ -253,12 +333,16 @@ class SilverTransformer:
             WHERE NOT EXISTS (
                 SELECT 1
                 FROM silver.taxi_trips AS s
-                WHERE s.bronze_trip_id = b.bronze_trip_id
+                WHERE
+                    s.bronze_trip_id
+                    = b.bronze_trip_id
             )
             AND NOT EXISTS (
                 SELECT 1
                 FROM silver.rejected_taxi_trips AS r
-                WHERE r.bronze_trip_id = b.bronze_trip_id
+                WHERE
+                    r.bronze_trip_id
+                    = b.bronze_trip_id
             )
             ORDER BY b.bronze_trip_id
             LIMIT :batch_size
@@ -268,7 +352,9 @@ class SilverTransformer:
         return pd.read_sql(
             query,
             connection,
-            params={"batch_size": self.batch_size},
+            params={
+                "batch_size": self.batch_size,
+            },
         )
 
     @staticmethod
@@ -276,6 +362,8 @@ class SilverTransformer:
         connection: Connection,
         dataframe: pd.DataFrame,
     ) -> None:
+        """Append valid records into Silver."""
+
         dataframe.to_sql(
             name="taxi_trips",
             con=connection,
@@ -291,6 +379,8 @@ class SilverTransformer:
         connection: Connection,
         dataframe: pd.DataFrame,
     ) -> None:
+        """Append rejected records into the Silver rejection table."""
+
         dataframe.to_sql(
             name="rejected_taxi_trips",
             con=connection,

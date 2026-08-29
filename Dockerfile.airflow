@@ -1,0 +1,6 @@
+FROM apache/airflow:3.3.1-python3.12
+
+COPY --chown=airflow:root pyproject.toml uv.lock README.md /tmp/nyc-taxi-etl/
+COPY --chown=airflow:root src /tmp/nyc-taxi-etl/src
+
+RUN pip install --no-cache-dir /tmp/nyc-taxi-etl

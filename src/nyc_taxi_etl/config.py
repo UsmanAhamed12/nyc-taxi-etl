@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     """Application configuration loaded from environment variables."""
 
     postgres_host: str = "localhost"
-    postgres_port: int = 5433
+    postgres_port: int = 5434
     postgres_db: str = "nyc_taxi"
     postgres_user: str = "nyc_taxi"
     postgres_password: str = "nyc_taxi_password"
