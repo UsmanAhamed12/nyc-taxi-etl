@@ -10,6 +10,13 @@ The pipeline processes **5.98 million source records** for January and February
 rejected-record traceability, reconciliation checks, structured logging, and
 unit tests.
 
+## Streamlit dashboard
+
+The dashboard presents headline KPIs alongside hourly trip demand and revenue
+by payment type, using data served directly from the PostgreSQL Gold layer.
+
+![NYC Yellow Taxi Analytics Streamlit dashboard](docs/images/streamlit-dashboard.png)
+
 ## Project highlights
 
 - Processes **5,980,721** source rows in memory-controlled batches.
